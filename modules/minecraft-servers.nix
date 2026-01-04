@@ -8,6 +8,7 @@
 with lib;
 let
   cfg = config.services.minecraft-servers;
+  our = import ../lib { inherit lib; };
 
   mkOpt = type: default: mkOption { inherit type default; };
 
@@ -37,48 +38,8 @@ let
       description = "Minecraft UUID";
     };
 
-  normalizeFiles = files: mapAttrs configToPath (filterAttrs (_: nonEmptyValue) files);
-  nonEmptyValue = x: nonEmpty x && (x ? value -> nonEmpty x.value);
-  nonEmpty = x: x != { } && x != [ ];
-
-  configToPath =
-    name: config:
-    if
-      isStringLike config # Includes paths and packages
-    then
-      config
-    else
-      (getFormat name config).generate name config.value;
-  getFormat =
-    name: config: if config ? format && config.format != null then config.format else inferFormat name;
-  inferFormat =
-    name:
-    let
-      error = throw "nix-minecraft: Could not infer format from file '${name}'. Specify one using 'format'.";
-      extension = builtins.match "[^.]*\\.(.+)" name;
-    in
-    if extension != null && extension != [ ] then
-      formatExtensions.${head extension} or error
-    else
-      error;
-
-  txtList =
-    { }:
-    {
-      type = with lib.types; listOf str;
-      generate = name: value: pkgs.writeText name (lib.concatStringsSep "\n" value);
-    };
-
-  formatExtensions = with pkgs.formats; {
-    "yml" = yaml { };
-    "yaml" = yaml { };
-    "json" = json { };
-    "props" = keyValue { };
-    "properties" = keyValue { };
-    "toml" = toml { };
-    "ini" = ini { };
-    "txt" = txtList { };
-  };
+  nonEmptyValue = our.nonEmptyValue;
+  normalizeFiles = our.normalizeFiles pkgs;
 
   configType = types.submodule {
     options = {

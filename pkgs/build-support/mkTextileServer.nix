@@ -23,5 +23,8 @@
 
   passthru = {
     inherit loader;
+    vanilla-server = minecraft-server;
+    vanillaJar = "${minecraft-server}/lib/minecraft/server.jar";
+    loaderJar = "${loader}/lib/minecraft/launch.jar";
   };
 }

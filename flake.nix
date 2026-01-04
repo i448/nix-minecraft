@@ -18,6 +18,8 @@
       ...
     }@inputs:
     let
+      ourLib = import ./lib { lib = nixpkgs.lib; };
+
       mkTests =
         pkgs:
         let
@@ -26,15 +28,15 @@
           callPackage = pkgs.newScope {
             inherit self;
             inherit (self) outputs;
-            lib = pkgs.lib.extend (_: _: { our = self.lib; });
+            lib = pkgs.lib.extend (_: _: { our = ourLib; });
           };
         in
-        optionalAttrs isLinux (mapAttrs (n: v: callPackage v { }) (self.lib.rakeLeaves ./tests));
+        optionalAttrs isLinux (mapAttrs (n: v: callPackage v { }) (ourLib.rakeLeaves ./tests));
 
-      nixosModules = self.lib.rakeLeaves ./modules;
+      nixosModules = ourLib.rakeLeaves ./modules;
     in
     {
-      lib = import ./lib { lib = nixpkgs.lib; };
+      lib = ourLib;
 
       overlay = import ./overlay.nix;
       overlays.default = self.overlay;
@@ -69,7 +71,7 @@
       rec {
         legacyPackages = import ./pkgs/all-packages.nix pkgs;
 
-        packages = {
+        packages = rec {
           inherit (legacyPackages)
             vanilla-server
             fabric-server
@@ -78,10 +80,41 @@
             velocity-server
             minecraft-server
             nix-modrinth-prefetch
+            mc-manager
             ;
 
           docsAsciiDoc = docs.optionsAsciiDoc;
           docsCommonMark = docs.optionsCommonMark;
+
+          oci-vanilla = lib.buildImage {
+            package = vanilla-server;
+          };
+
+          oci-fabric = lib.buildImage {
+            flavor = "fabric";
+            package = fabric-server;
+            # Example: Adding Fabric API
+            symlinks = {
+              "mods/fabric-api.jar" = pkgs.fetchurl {
+                url = "https://cdn.modrinth.com/data/P7dR8mSH/versions/99v969vN/fabric-api-0.111.0%2B1.21.1.jar";
+                hash = pkgs.lib.fakeHash;
+              };
+            };
+          };
+
+          oci = oci-vanilla;
+
+          oci-debug = lib.buildImage {
+            package = vanilla-server;
+            debug = true;
+          };
+        };
+
+        lib = ourLib // {
+          buildImage = args: ourLib.buildImage (args // {
+            inherit pkgs;
+            mc-manager = packages.mc-manager;
+          });
         };
 
         checks = mkTests (pkgs.extend self.outputs.overlays.default) // packages;

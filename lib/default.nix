@@ -112,5 +112,157 @@ lib.makeExtensible (
         wrapLine = chain stringToCharacters chunkCharacters (map concatStrings) (concatStringsSep "\n ");
       in
       chain (splitString "\n") (map wrapLine) concatLines manifestText;
+    
+    nonEmpty = x: x != { } && x != [ ];
+    nonEmptyValue = x: nonEmpty x && (x ? value -> nonEmpty x.value);
+
+    txtList = pkgs: { }: {
+      type = with lib.types; listOf str;
+      generate = name: value: pkgs.writeText name (lib.concatStringsSep "\n" value);
+    };
+
+    formatExtensions = pkgs: with pkgs.formats; {
+      "yml" = yaml { };
+      "yaml" = yaml { };
+      "json" = json { };
+      "props" = keyValue { };
+      "properties" = keyValue { };
+      "toml" = toml { };
+      "ini" = ini { };
+      "txt" = txtList pkgs { };
+    };
+
+    inferFormat = pkgs: name:
+      let
+        error = throw "nix-minecraft: Could not infer format from file '${name}'. Specify one using 'format'.";
+        extension = builtins.match "[^.]*\\.(.+)" name;
+      in
+      if extension != null && extension != [ ] then
+        (formatExtensions pkgs).${lib.head extension} or error
+      else
+        error;
+
+    getFormat = pkgs: name: config:
+      if config ? format && config.format != null then config.format else inferFormat pkgs name;
+
+    configToPath = pkgs: name: config:
+      if lib.isStringLike config then
+        config
+      else
+        (getFormat pkgs name config).generate name config.value;
+
+    normalizeFiles = pkgs: files: lib.mapAttrs (configToPath pkgs) (lib.filterAttrs (_: nonEmptyValue) files);
+
+    # Produces a directory containing all the files and symlinks for a server
+    mkServerData =
+      {
+        pkgs,
+        serverProperties ? { },
+        symlinks ? { },
+        files ? { },
+        whitelist ? { },
+        operators ? { },
+        ...
+      }:
+      let
+        allSymlinks = normalizeFiles pkgs (
+          {
+            "eula.txt".value = {
+              eula = true;
+            };
+            "eula.txt".format = pkgs.formats.keyValue { };
+          }
+          // symlinks
+        );
+        allFiles = normalizeFiles pkgs (
+          {
+            "whitelist.json".value = lib.mapAttrsToList (n: v: {
+              name = n;
+              uuid = v;
+            }) whitelist;
+            "ops.json".value = lib.mapAttrsToList (n: v: {
+              name = n;
+              uuid = v.uuid;
+              level = v.level;
+              bypassesPlayerLimit = v.bypassesPlayerLimit;
+            }) operators;
+            "server.properties".value = serverProperties;
+          }
+          // files
+        );
+      in
+      pkgs.runCommand "server-data" { } ''
+        mkdir -p $out
+        ${lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (n: v: ''
+            mkdir -p "$out/$(dirname "${n}")"
+            ln -s "${v}" "$out/${n}"
+          '') (allSymlinks // allFiles)
+        )}
+      '';
+
+    # Builds an OCI image for a Minecraft server
+    buildImage =
+      {
+        pkgs,
+        package,
+        mc-manager,
+        flavor ? "vanilla",
+        jvmOpts ? "-Xmx2G -Xms1G",
+        serverProperties ? { },
+        symlinks ? { },
+        files ? { },
+        whitelist ? { },
+        operators ? { },
+        imageName ? "minecraft-server",
+        tag ? "latest",
+        debug ? false,
+      }:
+      let
+        useMods = lib.elem flavor [ "fabric" "forge" ] || lib.hasPrefix "modpack" flavor;
+        mc-manager-final = mc-manager.override {
+          buildFeatures = if useMods then [ "mods" ] else [ ];
+        };
+        serverData = mkServerData {
+          inherit
+            pkgs
+            serverProperties
+            symlinks
+            files
+            whitelist
+            operators
+            ;
+        };
+      in
+      pkgs.dockerTools.buildLayeredImage {
+        name = imageName;
+        inherit tag;
+        contents =
+          [
+            pkgs.jre
+            mc-manager-final
+          ]
+          ++ (lib.optionals debug [
+            pkgs.coreutils
+            pkgs.bash
+            pkgs.busybox
+          ]);
+        config = {
+          Cmd = [ (lib.getExe mc-manager-final) ];
+          Env = [
+            "FLAVOR=${flavor}"
+            "VANILLA_JAR=${package.vanillaJar or "${package}/lib/minecraft/server.jar"}"
+            "LOADER_JAR=${package.loaderJar or ""}"
+            "JAVA_BIN=${pkgs.jre}/bin/java"
+            "MODS_DIR=${serverData}/mods"
+            "OVERRIDES_DIR=${serverData}"
+            "EULA=FALSE"
+          ];
+          WorkingDir = "/data";
+          Volumes = {
+            "/data" = { };
+          };
+        };
+      };
   }
 )
