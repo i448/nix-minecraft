@@ -1,7 +1,4 @@
-use std::collections::HashSet;
-use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::Path;
 use crate::util::copy_recursive;
 
