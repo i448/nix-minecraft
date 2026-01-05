@@ -217,12 +217,30 @@ lib.makeExtensible (
         imageName ? "minecraft-server",
         tag ? "latest",
         debug ? false,
+        extraContents ? [ ],
       }:
       let
         useMods = lib.elem flavor [ "fabric" "forge" ] || lib.hasPrefix "modpack" flavor;
         mc-manager-final = mc-manager.override {
           buildFeatures = if useMods then [ "mods" ] else [ ];
         };
+
+        # Extract attributes, favoring passthru if present
+        actualVanillaJar = package.passthru.vanillaJar or (package.vanillaJar or "${package}/lib/minecraft/server.jar");
+        actualLoaderJar = package.passthru.loaderJar or (package.loaderJar or null);
+        actualLoader = package.passthru.loader or (package.loader or null);
+        actualVanillaServer = package.passthru.vanilla-server or (package.vanilla-server or null);
+
+        # Create a stable directory structure for the container to reference
+        mc-artifacts = pkgs.runCommand "mc-artifacts" { } ''
+          mkdir -p $out/mc-artifacts
+          ln -s ${actualVanillaJar} $out/mc-artifacts/server.jar
+          ${lib.optionalString (actualLoaderJar != null) ''
+            ln -s ${actualLoaderJar} $out/mc-artifacts/loader.jar
+          ''}
+          ln -s ${serverData} $out/mc-artifacts/server-data
+        '';
+
         serverData = mkServerData {
           inherit
             pkgs
@@ -233,29 +251,40 @@ lib.makeExtensible (
             operators
             ;
         };
+        # Helper to inflate the closure of serverData (to catch symlink targets)
+        inflatedData = pkgs.runCommand "inflated-data" { } ''
+          mkdir -p $out
+          cp -rL ${serverData}/* $out/
+        '';
       in
       pkgs.dockerTools.buildLayeredImage {
         name = imageName;
         inherit tag;
         contents =
           [
-            pkgs.jre
+            pkgs.jre_headless
             mc-manager-final
+            mc-artifacts
+            package
+            inflatedData
           ]
+          ++ (lib.optional (actualVanillaServer != null) actualVanillaServer)
+          ++ (lib.optional (actualLoader != null) actualLoader)
           ++ (lib.optionals debug [
             pkgs.coreutils
             pkgs.bash
             pkgs.busybox
-          ]);
+          ])
+          ++ extraContents;
         config = {
           Cmd = [ (lib.getExe mc-manager-final) ];
           Env = [
             "FLAVOR=${flavor}"
-            "VANILLA_JAR=${package.vanillaJar or "${package}/lib/minecraft/server.jar"}"
-            "LOADER_JAR=${package.loaderJar or ""}"
-            "JAVA_BIN=${pkgs.jre}/bin/java"
-            "MODS_DIR=${serverData}/mods"
-            "OVERRIDES_DIR=${serverData}"
+            "VANILLA_JAR=/mc-artifacts/server.jar"
+            "LOADER_JAR=${if (actualLoaderJar != null) then "/mc-artifacts/loader.jar" else ""}"
+            "JAVA_BIN=${pkgs.jre_headless}/bin/java"
+            "MODS_DIR=/mc-artifacts/server-data/mods"
+            "OVERRIDES_DIR=/mc-artifacts/server-data"
             "EULA=FALSE"
           ];
           WorkingDir = "/data";

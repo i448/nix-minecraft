@@ -16,10 +16,11 @@
       packages.${system}.default = lib.buildImage {
         flavor = "fabric";
         package = packages.fabric-server;
+        debug = true;
         symlinks = {
           "mods/fabric-api.jar" = pkgs.fetchurl {
-            url = "https://cdn.modrinth.com/data/P7dR8mSH/versions/99v969vN/fabric-api-0.111.0%2B1.21.1.jar";
-            hash = "sha256-R47y6/Xb3/r1m5/S0P3E/uP8A/CjI/UoF7p/Z/X/Y="; # Example hash
+            url = "https://cdn.modrinth.com/data/P7dR8mSH/versions/gB6TkYEJ/fabric-api-0.140.2%2B1.21.11.jar";
+            hash = "sha256-t8RYO3/EihF5gsxZuizBDFO3K+zQHSXkAnCUgSb4QyE=";
           };
         };
       };
