@@ -132,7 +132,7 @@ For convenience, `velocityServers.velocity` is equivalent to the latest version.
 
 [Source](./pkgs/tools/fetchPackwizModpack)
 
-This function allows you to easily package a [packwiz](https://packwiz.infra.link/) modpack, for example, to run it own your server. An example:
+This function allows you to easily package a [packwiz](https://packwiz.infra.link/) modpack, for example, to run it on your server. An example:
 
 ```nix
 let
@@ -228,14 +228,62 @@ in
 
 All of these packages are also available under `packages`, not just `legacyPackages`.
 
-- `vanilla-server`: Same as `vanillaServers.vanilla`
-- `fabric-server`: Same as `fabricServers.fabric`
-- `quilt-server`: Same as `quiltServers.quilt`
-- `paper-server`: Same as `paperServers.paper`
-- `velocity-server`: Same as `velocityServers.velocity`
 - `minecraft-server`: Same as `vanilla-server`
 
 Server versions not found above can be setup manually via an override.
+
+### OCI Images
+
+`nix-minecraft` provides OCI-compliant container images for running Minecraft servers with Docker, Podman, or Kubernetes. These images use a **headless JVM** by default to minimize image size.
+
+#### Available Images
+
+- `packages.oci-vanilla`: Latest Vanilla server.
+- `packages.oci-fabric`: Latest Fabric server.
+- `packages.oci`: Alias for `oci-vanilla`.
+- `packages.oci-debug`: Vanilla server with extra troubleshooting tools (`bash`, `coreutils`, `busybox`).
+
+#### Building
+
+To build an image:
+
+```shell
+nix build github:Infinidoge/nix-minecraft#oci-vanilla
+```
+
+#### Running
+
+Load the built image into your container engine:
+
+```shell
+docker load < result
+```
+
+Run the container:
+
+```shell
+docker run -d \
+  -p 25565:25565 \
+  -v mc_data:/data \
+  -e EULA=TRUE \
+  minecraft-server:latest
+```
+
+#### Configuration
+
+The container is managed by a custom tool (`mc-manager`) that handles symlinking and server startup.
+
+**Environment Variables:**
+- `EULA`: Set to `TRUE` to agree to Mojang's EULA.
+- `JVM_OPTS`: Options for the JVM (e.g., `-Xmx2G -Xms1G`).
+- `FLAVOR`: The server flavor (automatically set in provided images).
+
+**Volumes:**
+- `/data`: The server's work directory. This **must** be a persistent volume to save world data and configurations.
+
+#### Customizing Images
+
+You can build custom images with specific mods or configurations using the `lib.buildImage` function provided by the flake. See the `oci-fabric` example in `flake.nix`.
 For example, this override changes the path the launch script uses to your provided jar file, and does not modify the vanilla jar:
 
 ```nix
